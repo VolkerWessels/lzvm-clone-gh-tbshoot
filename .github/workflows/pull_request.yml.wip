@@ -1,0 +1,19 @@
+name: Landingzone vending machine
+run-name: "deployment - branch: ${{ github.ref_name }}"
+
+on:
+  pull_request:
+    types: [reopened, synchronize, labeled]
+    branches:
+      - main
+    paths:
+      - vars/ssc_tst/**
+      - vars/ssc_prd/**
+      - vars/vwb_prd/**
+      - vars/vwi_prd/**
+      - vars/vwt_prd/**
+
+jobs:
+  check_changed_files:
+    name: Determine changed files
+    runs-on: ubuntu-latest

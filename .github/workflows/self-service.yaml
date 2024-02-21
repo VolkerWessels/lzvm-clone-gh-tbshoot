@@ -1,0 +1,238 @@
+name: Create a new Landingzone
+
+on:
+  workflow_dispatch:
+    inputs:
+        tenant:
+            description: 'Which tenant do you want to deploy to?'
+            required: true
+            type: choice
+            options:
+                - 'Infrastructuur'
+                - 'Telecom'
+                - 'BVGO'
+                - 'SSC'
+                - 'SSCTST'                
+        management_group_name:
+            description: 'Name of the management group, this is a logical name to distinguish the workloads under this management group'
+            required: true
+            type: string
+        subscription_type:
+            description: 'Type of the subscription'
+            required: true
+            type: choice
+            options:
+                - 'oa'
+                - 'shared'
+                - 'client'
+                - 'iam'
+        subscription_name:
+            description: 'Name of the workload, this will be the name of the subscription(s)'
+            required: true
+            type: string
+        network_cidr:
+            description: 'CIDR of the vnet in your subscription(s), leave 0 if you do not want a vnet'
+            required: true
+            default: '0'
+            type: string   
+        stages:
+            description: 'What stages do you want? (Each stage is a subscription)'
+            required: true
+            default: 'true'
+            type: choice
+            options:
+                - '["dev"]'
+                - '["dev", "tst"]'
+                - '["dev", "tst", "acc"]'
+                - '["dev", "tst", "acc", "prd"]'
+        Product:
+            description: 'Product, this sets the product tag, this is used for cost allocation'
+            required: true
+            type: string
+        Afdeling:
+            description: 'Afdeling, this sets the afdeling tag, this is used for cost allocation'
+            required: true
+            type: string
+        contributors:
+            description: 'List of users that should have the contributor role on the subscription (comma separated)'
+            required: true
+            type: string
+        readers:
+            description: 'List of users that should have the reader role on the subscription (comma separated)'
+            required: true
+            type: string            
+
+jobs:
+    set_tenant:
+        name: Set the tenant
+        runs-on: ubuntu-latest
+        outputs:
+            tenant: ${{ steps.set_tenant.outputs.tenant }}
+        steps:
+        - name: Set tenant
+          id: set_tenant
+          run: |
+            # Set the tenant
+            if [[ "${{ inputs.tenant}}" == "Infrastructuur" ]]; then
+                echo tenant="vwi_prd" >> $GITHUB_OUTPUT
+            elif [[ "${{ inputs.tenant }}" == "Telecom" ]]; then
+                echo tenant="vwt_prd" >> $GITHUB_OUTPUT
+            elif [[ "${{ inputs.tenant }}" == "BVGO" ]]; then
+                echo tenant="vwb_prd" >> $GITHUB_OUTPUT
+            elif [[ "${{ inputs.tenant }}" == "SSC" ]]; then
+                echo tenant="ssc_prd" >> $GITHUB_OUTPUT
+            elif [[ "${{ inputs.tenant }}" == "SSCTST" ]]; then
+                echo tenant="ssc_tst" >> $GITHUB_OUTPUT
+            else
+                echo "Invalid tenant"
+                exit 1
+            fi
+        - name: tenant
+          run: echo ${{ steps.set_tenant.outputs.tenant }}
+    subscription_request:
+        needs: [set_tenant]
+        environment: ${{ needs.set_tenant.outputs.tenant }}
+        runs-on: ${{ needs.set_tenant.outputs.tenant }}
+        steps:
+        - name: Validate inputs
+          run: echo
+
+        - name: Check if the users exist
+          run: |
+            # Login to the Entra SP
+            az login --service-principal \
+            --allow-no-subscriptions \
+            --username ${{ secrets.TF_VAR_AZUREAD_CLIENT_ID_ENTRA }} \
+            --password=${{ secrets.TF_VAR_AZUREAD_CLIENT_SECRET_ENTRA }} \
+            --tenant ${{ secrets.ARM_TENANT_ID }} -o tsv
+            
+            contributors=$(echo ${{ inputs.contributors }} | tr ',' ' ')
+            readers=$(echo ${{ inputs.readers }} | tr ',' ' ')
+
+            # Check if the users exist
+            for user in ${contributors}; do
+            az ad user show --id $user -o none
+            if [ $? -ne 0 ]; then
+                echo "Contributor $user does not exist"
+                exit 1
+            else
+                echo "Contributor $user found"
+            fi
+            done
+            for user in ${readers}; do
+            az ad user show --id $user -o none
+            if [ $? -ne 0 ]; then
+                echo "Reader $user does not exist"
+                exit 1
+            else
+                echo "Reader $user found"
+            fi
+            done
+            az account clear
+        
+        - name: check if management_group name is set and not longer than 11 characters
+          run: |
+            if [[ "${{ inputs.management_group_name }}" == "" ]]; then
+                echo "Management group name must be set"
+                exit 1
+            elif [[ "${{ inputs.management_group_name }}" =~ [^a-z0-9-] ]]; then
+                echo "Management group name can only contain letters, numbers and dashes"
+                exit 1
+            elif [[ "${{ inputs.management_group_name }}" =~ ^[0-9] ]]; then
+                echo "Management group name cannot start with a number"
+                exit 1
+            elif [[ "${{ inputs.management_group_name }}" =~ ^[a-z0-9-]{12,} ]]; then
+                echo "Management group name cannot be longer than 11 characters"
+                exit 1
+            fi
+
+        - name: check if subscription name is set and not longer than 32 characters
+          run: |
+            if [[ "${{ inputs.subscription_name }}" == "" ]]; then
+                echo "Subscription name must be set"
+                exit 1
+            elif [[ "${{ inputs.subscription_name }}" =~ [^a-z0-9-] ]]; then
+                echo "Subscription name can only contain letters, numbers and dashes"
+                exit 1
+            elif [[ "${{ inputs.subscription_name }}" =~ ^[0-9] ]]; then
+                echo "Subscription name cannot start with a number"
+                exit 1
+            elif [[ "${{ inputs.subscription_name }}" =~ ^[a-z0-9-]{33,} ]]; then
+                echo "Subscription name cannot be longer than 32 characters"
+                exit 1
+            fi
+
+        - name: check if product is set
+          run: |
+            if [[ "${{ inputs.Product }}" == "" ]]; then
+                echo "Product must be set"
+                exit 1
+            fi
+        
+        - name: Create landingzone vars file
+          run: |
+            # # Create the readers array
+
+            # # Define the comma-separated list of users
+            # readers=${{ inputs.readers }}
+            # contributors=${{ inputs.contributors }}
+
+            # # Convert the list into an array
+            # IFS=',' read -r -a reader_array <<< "$readers"
+            # IFS=',' read -r -a contributor_array <<< "$contributors"
+
+            # # Quote each user
+            # quoted_readers=()
+            # for user in "${reader_array[@]}"; do
+            #     quoted_readers+=("\"$user\"")
+            # done
+
+            # quoted_contributors=()
+            # for user in "${contributor_array[@]}"; do
+            #   quoted_contributors+=("\"$user\"")
+            # done
+
+            # # Convert the array to a string
+            # readers_string="["$(IFS=, ; echo "${quoted_readers[*]}")"]"
+            # contributors_string="["$(IFS=, ; echo "${quoted_contributors[*]}")"]"
+
+            # Create the vars file
+            mkdir -p vars/${{ needs.set_tenant.outputs.tenant }}
+            touch vars/${{ needs.set_tenant.outputs.tenant }}/${{inputs.subscription_name}}.tfvars
+            # Add all inputs to the vars file as key = "value"
+            echo "# Management group that will be created under the "Landingzones" management group" > vars/${{ needs.set_tenant.outputs.tenant }}/${{inputs.subscription_name}}.tfvars
+            echo "# NOTE: If parent_management_group_exists is set to true, both the parent_management_group_name and management_group_name must exist!!!!" >> vars/${{ needs.set_tenant.outputs.tenant }}/${{inputs.subscription_name}}.tfvars
+            echo "parent_management_group_exists = true" >> vars/${{ needs.set_tenant.outputs.tenant }}/${{inputs.subscription_name}}.tfvars
+            echo "management_group_name = \"${{ inputs.management_group_name }}\"" >> vars/${{ needs.set_tenant.outputs.tenant }}/${{inputs.subscription_name}}.tfvars
+            echo "" >> vars/${{ needs.set_tenant.outputs.tenant }}/${{inputs.subscription_name}}.tfvars
+            echo "# subscription details for the naming convention and tagging" >> vars/${{ needs.set_tenant.outputs.tenant }}/${{inputs.subscription_name}}.tfvars
+            echo "subscription_type = \"${{ inputs.subscription_type }}\"" >> vars/${{ needs.set_tenant.outputs.tenant }}/${{inputs.subscription_name}}.tfvars
+            echo "subscription_name = {${{ inputs.subscription_name }}\"" >> vars/${{ needs.set_tenant.outputs.tenant }}/${{inputs.subscription_name}}.tfvars
+            echo "subscription_tags = { "Afdeling" : "${{ inputs.Afdeling }}", "repository" : "cloud-platform-lzvm", "Product": "${{ inputs.Product }}" } >> vars/${{ needs.set_tenant.outputs.tenant }}/${{inputs.subscription_name}}.tfvars
+            echo "baseline_tags = { "baseline" : "true" } >> vars/${{ needs.set_tenant.outputs.tenant }}/${{inputs.subscription_name}}.tfvars
+            echo "" >> vars/${{ needs.set_tenant.outputs.tenant }}/${{inputs.subscription_name}}.tfvars
+            echo "# list of stages to create (each stage is a subscription)" >> vars/${{ needs.set_tenant.outputs.tenant }}/${{inputs.subscription_name}}.tfvars
+            echo "stages = ${{ inputs.stages }}" >> vars/${{ needs.set_tenant.outputs.tenant }}/${{inputs.subscription_name}}.tfvars
+            echo "" >> vars/${{ needs.set_tenant.outputs.tenant }}/${{inputs.subscription_name}}.tfvars
+            echo "# list of user_principals to add to the contributer group (Optional)" >> vars/${{ needs.set_tenant.outputs.tenant }}/${{inputs.subscription_name}}.tfvars
+            echo "contributors = $readers_string" >> vars/${{ needs.set_tenant.outputs.tenant }}/${{inputs.subscription_name}}.tfvars
+            echo "" >> vars/${{ needs.set_tenant.outputs.tenant }}/${{inputs.subscription_name}}.tfvars
+            echo "# list of user_principals to add to the reader group (Optional)" >> vars/${{ needs.set_tenant.outputs.tenant }}/${{inputs.subscription_name}}.tfvars
+            echo "readers = $readers_string" >> vars/${{ needs.set_tenant.outputs.tenant }}/${{inputs.subscription_name}}.tfvars
+            echo "# VNET sizes for each stage, these are optional, if you do not define them, no network resources will be created" >> vars/${{ needs.set_tenant.outputs.tenant }}/${{inputs.subscription_name}}.tfvars
+            # Add the vnet sizes to the vars file for each stage
+            if [[ ${{ inputs.stages }} == *"dev"* ]]; then
+                echo "dev_vnet_size = \"${{ inputs.network_cidr }}\"" >> vars/${{ needs.set_tenant.outputs.tenant }}/${{inputs.subscription_name}}.tfvars
+            fi
+            if [[ ${{ inputs.stages }} == *"tst"* ]]; then
+                echo "tst_vnet_size = \"${{ inputs.network_cidr }}\"" >> vars/${{ needs.set_tenant.outputs.tenant }}/${{inputs.subscription_name}}.tfvars
+            fi
+            if [[ ${{ inputs.stages }} == *"acc"* ]]; then
+                echo "acc_vnet_size = \"${{ inputs.network_cidr }}\"" >> vars/${{ needs.set_tenant.outputs.tenant }}/${{inputs.subscription_name}}.tfvars
+            fi
+            if [[ ${{ inputs.stages }} == *"prd"* ]]; then
+                echo "prd_vnet_size = \"${{ inputs.network_cidr }}\"" >> vars/${{ needs.set_tenant.outputs.tenant }}/${{inputs.subscription_name}}.tfvars
+            fi
+
+        - name: Show the ladngingzone vars file
+          run: cat vars/${{ needs.set_tenant.outputs.tenant }}/${{inputs.subscription_name}}.tfvars

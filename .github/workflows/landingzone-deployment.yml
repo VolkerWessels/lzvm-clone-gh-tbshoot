@@ -1,0 +1,258 @@
+name: Landingzone deployment
+
+env:
+  ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+  ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+  ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+
+on:
+  workflow_call:
+    inputs:
+      tenant:
+        required: true
+        type: string
+      tf_action:
+        required: true
+        type: string
+      matrix:
+        required: true
+        type: string
+      plan:
+        required: true
+        type: string
+      runner_labels:
+        required: true
+        type: string
+        default: ubuntu-latest
+    outputs:  
+      terraform_outputs:
+        description: "The terraform outputs for further provisioning"
+        value: ${{ jobs.terraform.outputs.terraform_outputs }}
+
+jobs:
+  terraform:
+    name: TF
+    environment: ${{ inputs.tenant }}
+    outputs:
+      terraform_outputs: ${{ steps.terraform_outputs.outputs.terraform_outputs }}
+    # concurrency:
+    #   group: ${{ github.workflow }}
+    runs-on: ${{ inputs.runner_labels}}
+    strategy:
+      matrix:
+        subscription: ${{ fromJson(inputs.matrix) }}
+      fail-fast: false
+    env:
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+      # ARM_SUBSCRIPTION_ID: ${{ secrets.LAUNCHPAD_SUBSCRIPTION_ID }}
+      ARM_CLIENT_ID: ${{ secrets.TF_VAR_azuread_client_id_entra }}
+      ARM_CLIENT_SECRET: ${{ secrets.TF_VAR_azuread_client_secret_entra }}
+      # IDL0
+      TF_VAR_azuread_client_id_entra: ${{ secrets.TF_VAR_azuread_client_id_entra }}
+      TF_VAR_azuread_client_secret_entra: ${{ secrets.TF_VAR_azuread_client_secret_entra }}
+      # SCL
+      TF_VAR_azurerm_client_id_scl: ${{ secrets.TF_VAR_azurerm_client_id_scl }}
+      TF_VAR_azurerm_client_secret_scl: ${{ secrets.TF_VAR_azurerm_client_secret_scl }}
+      # ESLZ
+      TF_VAR_azurerm_client_id_eslz: ${{ secrets.TF_VAR_azurerm_client_id_eslz }}
+      TF_VAR_azurerm_client_secret_eslz: ${{ secrets.TF_VAR_azurerm_client_secret_eslz }}
+      # IPAM
+      TF_VAR_azurerm_client_id_ipam: ${{ secrets.TF_VAR_azurerm_client_id_ipam }}
+      TF_VAR_azurerm_client_secret_ipam: ${{ secrets.TF_VAR_azurerm_client_secret_ipam }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ github.workspace }}/plans/${{ inputs.plan }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Get github app token to access internal repositories
+        id: get_app_token
+        uses: tibdex/github-app-token@v1
+        with:
+          app_id: ${{ secrets.CLOUD_PLATFORM_TERRAFORM_MODULES_APP_ID }}
+          private_key: ${{ secrets.CLOUD_PLATFORM_TERRAFORM_MODULES_PRIVATE_KEY }}
+  
+      - name: Extend Git credentials
+        uses: de-vri-es/setup-git-credentials@v2.0.10
+        with:
+          credentials: https://user:${{ steps.get_app_token.outputs.token }}@github.com
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform Format
+        run: terraform fmt -recursive
+
+      - name: LANDINGZONE_BASELINE (L4) - Set the Terrafrom backend key for this run
+        if: inputs.plan == 'landingzone_baseline'
+        id: baseline_backend_config
+        run: |
+          # set the backend_key to the name of the subscription file, backend_key is used to name the state file
+          backend_key=${{ matrix.subscription.subscription_short_name }}-baseline
+          echo backend_key=$backend_key >> $GITHUB_ENV
+          echo storage_account_name=${{ secrets.LEVEL4_STORAGE_ACCOUNT_NAME }} >> $GITHUB_ENV
+          echo resource_group_name=${{ secrets.LEVEL4_STORAGE_ACCOUNT_RESOURCE_GROUP_NAME }} >> $GITHUB_ENV
+          echo container_name=${{ matrix.subscription.subscription_short_name }} >> $GITHUB_ENV   
+          # echo var_file=../../vars/${{ inputs.tenant }}/${{ matrix.subscription.subscription_name_var }}.tfvars >> $GITHUB_ENV
+          echo var_file=../../${{ matrix.subscription.subscription_var_file }} >> $GITHUB_ENV
+          echo subscription=${{ matrix.subscription.subscription_name }} >> $GITHUB_ENV
+          echo ARM_SUBSCRIPTION_ID=${{ matrix.subscription.subscription_id }} >> $GITHUB_ENV
+          echo ARM_CLIENT_ID=${{ secrets.TF_VAR_azurerm_client_id_scl }} >> $GITHUB_ENV
+          echo ARM_CLIENT_SECRET=${{ secrets.TF_VAR_azurerm_client_secret_scl }} >> $GITHUB_ENV
+
+      - name: LANDINGZONE_VENDING (L2) - Set the Terrafrom backend key for this run
+        if: inputs.plan == 'lzvm'
+        id: lzvm_backend_config
+        run: |
+          # set the backend_key to the name of the subscription file, backend_key is used to name the state file
+          backend_key=$(basename "${{ matrix.subscription }}" .tfvars)
+          echo backend_key=$backend_key >> $GITHUB_ENV
+          echo storage_account_name=${{ secrets.LEVEL2_STORAGE_ACCOUNT_NAME }} >> $GITHUB_ENV
+          echo resource_group_name=${{ secrets.LEVEL2_STORAGE_ACCOUNT_RESOURCE_GROUP_NAME }} >> $GITHUB_ENV
+          echo container_name=tfstate >> $GITHUB_ENV
+          echo var_file=../../${{ matrix.subscription }} >> $GITHUB_ENV
+          echo subscription=${backend_key} >> $GITHUB_ENV
+          echo ARM_SUBSCRIPTION_ID=${{ secrets.LAUNCHPAD_SUBSCRIPTION_ID }} >> $GITHUB_ENV
+          
+      - name: Download Plan
+        if: inputs.tf_action == 'apply'
+        id: download_plan
+        uses: actions/download-artifact@v3
+        with:
+          name: tfplan_${{ env.backend_key }}
+          path: plans/${{ inputs.plan }}/
+
+      - name: Terraform Init
+        id: init
+        run: |
+          terraform init \
+          -backend-config="key=${backend_key}.tfstate" \
+          -backend-config="subscription_id=${{ secrets.LAUNCHPAD_SUBSCRIPTION_ID }}" \
+          -backend-config="storage_account_name=${storage_account_name}" \
+          -backend-config="resource_group_name=${resource_group_name}" \
+          -backend-config="container_name=${container_name}"
+
+      - name: Terraform Plan
+        if: inputs.tf_action == 'plan'
+        id: plan
+        run: |
+          terraform plan \
+          -var-file=${{ env.var_file }} \
+          -var-file=../../globals/${{ inputs.tenant }}/globals.tfvars \
+          -out=tfplan
+        env:
+          ARM_SUBSCRIPTION_ID: ${{ env.ARM_SUBSCRIPTION_ID }}
+          ARM_CLIENT_ID: ${{ env.ARM_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ env.ARM_CLIENT_SECRET }}
+          # These are TF variables that are used in the lz baseline plan
+          TF_VAR_subscription_id: ${{ matrix.subscription.subscription_id }}
+          TF_VAR_subscription_name: ${{ matrix.subscription.subscription_name }}
+          TF_VAR_vnet_cidr: ${{ matrix.subscription.vnet_cidr }}
+          TF_VAR_ipam_tag: ${{ matrix.subscription.ipam_tag }}
+          TF_VAR_vhub_subscription_id: ${{ matrix.subscription.vhub_subscription_id }}
+          TF_VAR_stage: ${{ matrix.subscription.environment }}
+          # TF_VAR_vnet_exists: ${{ env.TF_VAR_vnet_exists }}
+      
+      - name: Upload Plan
+        if: inputs.tf_action == 'plan'
+        id: upload_plan
+        uses: actions/upload-artifact@v3
+        with:
+          name: tfplan_${{ env.backend_key }}
+          path: |
+            plans/${{ inputs.plan }}/tfplan
+            plans/${{ inputs.plan }}/.terraform.lock.hcl
+
+      - name: Terraform Apply
+        if: github.event_name == 'push' && github.ref_name == 'main' && inputs.tf_action == 'apply'
+        id: apply
+        run: terraform apply -auto-approve tfplan
+
+      - name: Show plan output in summary
+        if: inputs.tf_action == 'plan'
+        id: plan_parser
+        run: |
+          terraform show -no-color tfplan > tfplan_output
+          # Check if "Plan:" occurs in the tfplan output
+          echo "## ${{ inputs.tenant }} - ${{ env.subscription }}" > summary.md
+          if [ "$(grep -cm1 "Plan:" tfplan_output)" -eq 0 ]; then
+            echo "### Plan: No changes. Your infrastructure matches the configuration." >> summary.md
+            echo "" >> summary.md
+          else
+            echo "### $(grep -e 'Plan:' tfplan_output -m1)" >> summary.md
+            echo '```js' >> summary.md
+            if [ "$(grep -E -cm1 "has changed" tfplan_output)" -eq 1 ]; then
+              echo "//Changes outside of Terraform items:" >> summary.md
+              echo "$(grep -E -A1 "has changed" tfplan_output | sed 's/^[[:space:]]*#//' | sed 's/^--//')" >> summary.md
+              echo "" >> summary.md
+            fi
+            if [ "$(grep -E -cm1 "must be replaced" tfplan_output)" -eq 1 ]; then
+              echo "//Items that must be replaces:" >> summary.md
+              echo "$(grep -E -A1 "must be replaced" tfplan_output | sed 's/^[[:space:]]*#//' | sed 's/^--//')" >> summary.md
+              echo "" >> summary.md
+            fi
+            if [ "$(grep -E -cm1 "has been deleted" tfplan_output)" -eq 1 ]; then
+              echo "//Deleted items:" >> summary.md
+              echo "$(grep -E "has been deleted" tfplan_output | sed 's/^[[:space:]]*#//' | sed 's/^--//')" >> summary.md
+              echo "" >> summary.md
+            fi    
+            if [ "$(grep -E -cm1 "be destroyed" tfplan_output)" -eq 1 ]; then
+              echo "//Destroyed items:" >> summary.md
+              echo "$(grep -E -A1 "be destroyed" tfplan_output | sed 's/^[[:space:]]*#//' | sed 's/^--//')" >> summary.md
+              echo "" >> summary.md
+            fi
+            if [ "$(grep -E -cm1 "updated in-place" tfplan_output)" -eq 1 ]; then
+              echo "//Changed items:" >> summary.md
+              echo "$(grep -E "updated in-place" tfplan_output | sed 's/^[[:space:]]*#//')" >> summary.md
+              echo "" >> summary.md
+            fi
+            if [ "$(grep -E -cm1 "will be created" tfplan_output)" -eq 1 ]; then
+              echo "//Created items:" >> summary.md
+              echo "$(grep -E "will be created" tfplan_output | sed 's/^[[:space:]]*#//')" >> summary.md
+            fi
+            echo '```' >> summary.md
+            echo "" >> summary.md
+          fi
+
+          echo "<details><summary>Terraform plan output</summary><p>" >> summary.md
+          echo "" >> summary.md
+          echo '```js' >> summary.md
+          cat tfplan_output >> summary.md
+          echo '```' >> summary.md
+          echo "" >> summary.md
+          echo "</p></details>" >> summary.md
+          cat summary.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Get the terraform outputs for further provisioning
+        if: inputs.plan == 'lzvm' && inputs.tf_action == 'apply'
+        id: terraform_outputs
+        run: |
+          terraform output -json   
+          terraform output -json > output.json
+          terraform_outputs=$(cat output.json | jq -r -c '.lzvm.value | to_entries | map({ environment: .key, caf_prefix: .value.caf_prefix, subscription_id: .value.subscription_id, subscription_name: .value.subscription_name, subscription_var_file: "${{ matrix.subscription }}", subscription_name_var: .value.subscription_name_var, subscription_short_name: .value.subscription_short_name, vhub_subscription_id: .value.vhub_subscription_id, vnet_cidr: .value.ipam_reservations.cidr, description: .value.ipam_reservations.description, ipam_tag: .value.ipam_reservations.id })')
+          echo "terraform_outputs=${terraform_outputs}" >> $GITHUB_OUTPUT
+          echo ${terraform_outputs}
+
+  # tfm-docs:
+  #   runs-on: ubuntu-latest
+  #   needs: terraform
+  #   steps:
+  #     - name: Checkout the repository
+  #       id: checkout
+  #       uses: actions/checkout@v3
+  #       with:
+  #         fetch-depth: 0
+  #     - name: Render terraform docs inside README.md
+  #       uses: terraform-docs/gh-actions@v1.0.0
+  #       with:
+  #         find-dir: ./
+  #         git-commit-message: "[tfm-docs][skip ci] - updating terraform docs"
+  #         output-file: README.md
+  #         output-method: inject
+  #         git-push: "true"

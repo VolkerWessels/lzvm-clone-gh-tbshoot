@@ -1,0 +1,329 @@
+name: Landingzone vending machine
+run-name: "deployment - branch: ${{ github.ref_name }}"
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - vars/ssc_tst/**
+      - vars/ssc_prd/**
+      - vars/vwb_prd/**
+      - vars/vwi_prd/**
+      - vars/vwt_prd/**
+
+jobs:
+  check_changed_files:
+    name: Determine changed files
+    runs-on: ubuntu-latest
+    outputs:
+      changes_detected: ${{ steps.detect_changes.outputs.changes_detected }}
+      ssc_prd_matrix: ${{ steps.detect_changes.outputs.ssc_prd_matrix }}
+      vwb_prd_matrix: ${{ steps.detect_changes.outputs.vwb_prd_matrix }}
+      vwi_prd_matrix: ${{ steps.detect_changes.outputs.vwi_prd_matrix }}
+      vwt_prd_matrix: ${{ steps.detect_changes.outputs.vwt_prd_matrix }}
+      changes: ${{ steps.changes.outputs.subscriptions_files }}
+    steps:
+    - name: Checkout the repository
+      uses: actions/checkout@v3
+    
+    - name: Check for changes
+      uses: dorny/paths-filter@v2
+      id: changes
+      with:
+        base: ${{ github.ref }}
+        list-files: json
+        filters: |
+            subscriptions:
+            - "vars/**/**"
+
+    - name: create matrix
+      id: detect_changes
+      shell: python
+      env:
+        CHANGED_FILES: ${{ steps.changes.outputs.subscriptions_files }}
+      run: |
+          import os
+          import json
+          
+          # Load the list of file paths from the environment variable
+          changes = json.loads(os.environ['CHANGED_FILES'])
+          
+          def set_output(name, value):
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as github_output:
+                  print(f'{name}={value}', file=github_output)
+          
+          
+          # Initialize lists for each tenant
+          ssc_prd_list = []
+          vwb_prd_list = []
+          vwi_prd_list = []
+          vwt_prd_list = []
+          
+          # Iterate over the file paths
+          for file_path in changes:
+              # Split the file path by '/' to get its components
+              path_components = file_path.split('/')
+              
+              # Ensure there are at least 2 components to extract the tenant
+              if len(path_components) >= 2:
+                  tenant = path_components[1]  # Extract the tenant (the second component)
+                  
+                  # Determine the appropriate tenant list and append the file path
+                  if tenant == "ssc_prd":
+                      ssc_prd_list.append(file_path)
+                  if tenant == "vwb_prd":
+                      vwb_prd_list.append(file_path)
+                  if tenant == "vwi_prd":
+                      vwi_prd_list.append(file_path)
+                  if tenant == "vwt_prd":
+                      vwt_prd_list.append(file_path)
+          
+          # If the list is empty, set it to 'none', this is needed to make the tenant workflow skippable
+          if not ssc_prd_list:
+              ssc_prd_list = 'none'
+          if not vwb_prd_list:
+              vwb_prd_list = 'none'
+          if not vwi_prd_list:
+              vwi_prd_list = 'none'
+          if not vwt_prd_list:
+            vwt_prd_list = 'none'
+
+          # Create each tenant matrix
+          set_output('ssc_prd_matrix', ssc_prd_list)
+          set_output('vwb_prd_matrix', vwb_prd_list)
+          set_output('vwi_prd_matrix', vwi_prd_list)
+          set_output('vwt_prd_matrix', vwt_prd_list)
+    
+    - name: print the output
+      run: |
+        echo "CHANGED FILES: ${{ steps.changes.outputs.subscriptions_files }}"
+        echo "SSC_PRD CHANGES: ${{ steps.detect_changes.outputs.ssc_prd_matrix }}"
+        echo "VWB_PRD CHANGES: ${{ steps.detect_changes.outputs.vwb_prd_matrix }}"
+        echo "VWI_PRD CHANGES: ${{ steps.detect_changes.outputs.vwi_prd_matrix }}"
+        echo "VWT_PRD CHANGES: ${{ steps.detect_changes.outputs.vwt_prd_matrix }}"
+  
+  ### VWT ###
+
+  vwt_prd_plan_subscriptions:
+    name: VWT SUBSCRIPTIONS - Plan
+    needs: [check_changed_files]
+    if: needs.check_changed_files.outputs.vwt_prd_matrix != 'none'
+    # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
+    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    with:
+      tf_action: plan
+      tenant: vwt_prd
+      runner_labels: vwt_prd
+      matrix: ${{ needs.check_changed_files.outputs.vwt_prd_matrix }}
+      plan: lzvm
+    secrets: inherit
+  
+  vwt_prd_apply_subscriptions:
+    name: VWT SUBSCRIPTIONS - Apply
+    needs: [check_changed_files,vwt_prd_plan_subscriptions]
+    if: needs.check_changed_files.outputs.vwt_prd_matrix != 'none' && github.event_name == 'push' && github.ref_name == 'main'
+    # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
+    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    with:
+      tf_action: apply
+      tenant: vwt_prd
+      runner_labels: vwt_prd
+      matrix: ${{ needs.check_changed_files.outputs.vwt_prd_matrix }}
+      plan: lzvm
+    secrets: inherit
+  
+  vwt_prd_plan_lz_baseline:
+    name: VWT BASELINE - Plan
+    needs: [vwt_prd_apply_subscriptions]
+    # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
+    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    with:
+      tf_action: plan
+      tenant: vwt_prd
+      runner_labels: vwt_prd
+      matrix: ${{ needs.vwt_prd_apply_subscriptions.outputs.terraform_outputs }}
+      plan: landingzone_baseline
+    secrets: inherit
+  
+  vwt_prd_apply_lz_baseline:
+    name: VWT BASELINE - Apply
+    needs: [vwt_prd_apply_subscriptions,vwt_prd_plan_lz_baseline]
+    # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
+    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    with:
+      tf_action: apply
+      tenant: vwt_prd
+      runner_labels: vwt_prd
+      matrix: ${{ needs.vwt_prd_apply_subscriptions.outputs.terraform_outputs }}
+      plan: landingzone_baseline
+    secrets: inherit
+
+
+    ### VWB ###
+
+  vwb_prd_plan_subscriptions:
+    name: VWB SUBSCRIPTIONS - Plan
+    needs: [check_changed_files]
+    if: needs.check_changed_files.outputs.vwb_prd_matrix != 'none'
+    # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
+    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    with:
+      tf_action: plan
+      tenant: vwb_prd
+      runner_labels: vwb_prd
+      matrix: ${{ needs.check_changed_files.outputs.vwb_prd_matrix }}
+      plan: lzvm
+    secrets: inherit
+
+  vwb_prd_apply_subscriptions:
+    name: VWB SUBSCRIPTIONS - Apply
+    needs: [check_changed_files,vwb_prd_plan_subscriptions]
+    if: needs.check_changed_files.outputs.vwb_prd_matrix != 'none' && github.event_name == 'push' && github.ref_name == 'main'
+    # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
+    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    with:
+      tf_action: apply
+      tenant: vwb_prd
+      runner_labels: vwb_prd
+      matrix: ${{ needs.check_changed_files.outputs.vwb_prd_matrix }}
+      plan: lzvm
+    secrets: inherit
+
+  vwb_prd_plan_lz_baseline:
+    name: VWB BASELINE - Plan
+    needs: [vwb_prd_apply_subscriptions]
+    # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
+    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    with:
+      tf_action: plan
+      tenant: vwb_prd
+      runner_labels: vwb_prd
+      matrix: ${{ needs.vwb_prd_apply_subscriptions.outputs.terraform_outputs }}
+      plan: landingzone_baseline
+    secrets: inherit
+
+  vwb_prd_apply_lz_baseline:
+    name: VWB BASELINE - Apply
+    needs: [vwb_prd_apply_subscriptions,vwb_prd_plan_lz_baseline]
+    # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
+    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    with:
+      tf_action: apply
+      tenant: vwb_prd
+      runner_labels: vwb_prd
+      matrix: ${{ needs.vwb_prd_apply_subscriptions.outputs.terraform_outputs }}
+      plan: landingzone_baseline
+    secrets: inherit
+  
+  ### VWI ###
+
+  vwi_prd_plan_subscriptions:
+    name: VWI SUBSCRIPTIONS - Plan
+    needs: [check_changed_files]
+    if: needs.check_changed_files.outputs.vwi_prd_matrix != 'none'
+    # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
+    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    with:
+      tf_action: plan
+      tenant: vwi_prd
+      runner_labels: vwi_prd
+      matrix: ${{ needs.check_changed_files.outputs.vwi_prd_matrix }}
+      plan: lzvm
+    secrets: inherit
+
+  vwi_prd_apply_subscriptions:
+    name: VWI SUBSCRIPTIONS - Apply
+    needs: [check_changed_files,vwi_prd_plan_subscriptions]
+    if: needs.check_changed_files.outputs.vwi_prd_matrix != 'none' && github.event_name == 'push' && github.ref_name == 'main'
+    # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
+    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    with:
+      tf_action: apply
+      tenant: vwi_prd
+      runner_labels: vwi_prd
+      matrix: ${{ needs.check_changed_files.outputs.vwi_prd_matrix }}
+      plan: lzvm
+    secrets: inherit
+
+  vwi_prd_plan_lz_baseline:
+    name: VWI BASELINE - Plan
+    needs: [vwi_prd_apply_subscriptions]
+    # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
+    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    with:
+      tf_action: plan
+      tenant: vwi_prd
+      runner_labels: vwi_prd
+      matrix: ${{ needs.vwi_prd_apply_subscriptions.outputs.terraform_outputs }}
+      plan: landingzone_baseline
+    secrets: inherit
+
+  vwi_prd_apply_lz_baseline:
+    name: VWI BASELINE - Apply
+    needs: [vwi_prd_apply_subscriptions,vwi_prd_plan_lz_baseline]
+    # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
+    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    with:
+      tf_action: apply
+      tenant: vwi_prd
+      runner_labels: vwi_prd
+      matrix: ${{ needs.vwi_prd_apply_subscriptions.outputs.terraform_outputs }}
+      plan: landingzone_baseline
+    secrets: inherit
+
+  ### SSC ###
+
+  ssc_prd_plan_subscriptions:
+    name: SSC SUBSCRIPTIONS - Plan
+    needs: [check_changed_files]
+    if: needs.check_changed_files.outputs.ssc_prd_matrix != 'none'
+    # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
+    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    with:
+      tf_action: plan
+      tenant: ssc_prd
+      runner_labels: ssc_prd
+      matrix: ${{ needs.check_changed_files.outputs.ssc_prd_matrix }}
+      plan: lzvm
+    secrets: inherit
+
+  ssc_prd_apply_subscriptions:
+    name: SSC SUBSCRIPTIONS - Apply
+    needs: [check_changed_files,ssc_prd_plan_subscriptions]
+    if: needs.check_changed_files.outputs.ssc_prd_matrix != 'none' && github.event_name == 'push' && github.ref_name == 'main'
+    # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
+    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    with:
+      tf_action: apply
+      tenant: ssc_prd
+      runner_labels: ssc_prd
+      matrix: ${{ needs.check_changed_files.outputs.ssc_prd_matrix }}
+      plan: lzvm
+    secrets: inherit
+
+  ssc_prd_plan_lz_baseline:
+    name: SSC BASELINE - Plan
+    needs: [ssc_prd_apply_subscriptions]
+    # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
+    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    with:
+      tf_action: plan
+      tenant: ssc_prd
+      runner_labels: ssc_prd
+      matrix: ${{ needs.ssc_prd_apply_subscriptions.outputs.terraform_outputs }}
+      plan: landingzone_baseline
+    secrets: inherit
+
+  ssc_prd_apply_lz_baseline:
+    name: SSC BASELINE - Apply
+    needs: [ssc_prd_apply_subscriptions,ssc_prd_plan_lz_baseline]
+    # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
+    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    with:
+      tf_action: apply
+      tenant: ssc_prd
+      runner_labels: ssc_prd
+      matrix: ${{ needs.ssc_prd_apply_subscriptions.outputs.terraform_outputs }}
+      plan: landingzone_baseline
+    secrets: inherit
