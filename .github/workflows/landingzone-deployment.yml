@@ -44,7 +44,7 @@ jobs:
         subscription: ${{ fromJson(inputs.matrix) }}
       fail-fast: false
     env:
-      # ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
       # ARM_SUBSCRIPTION_ID: ${{ secrets.LAUNCHPAD_SUBSCRIPTION_ID }}
       ARM_CLIENT_ID: ${{ secrets.TF_VAR_azuread_client_id_entra }}
       ARM_CLIENT_SECRET: ${{ secrets.TF_VAR_azuread_client_secret_entra }}
@@ -118,7 +118,7 @@ jobs:
           echo container_name=tfstate >> $GITHUB_ENV
           echo var_file=../../${{ matrix.subscription }} >> $GITHUB_ENV
           echo subscription=${backend_key} >> $GITHUB_ENV
-          echo ARM_SUBSCRIPTION_ID=${{ matrix.subscription.subscription_id }} >> $GITHUB_ENV
+          echo ARM_SUBSCRIPTION_ID=${{ secrets.LAUNCHPAD_SUBSCRIPTION_ID }} >> $GITHUB_ENV
 
       - name: Download Plan
         if: inputs.tf_action == 'apply'
@@ -133,7 +133,7 @@ jobs:
         run: |
           terraform init \
           -backend-config="key=${backend_key}.tfstate" \
-          -backend-config="subscription_id=${{ env.ARM_SUBSCRIPTION_ID }}" \
+          -backend-config="subscription_id=${{ secrets.LAUNCHPAD_SUBSCRIPTION_ID }}" \
           -backend-config="storage_account_name=${storage_account_name}" \
           -backend-config="resource_group_name=${resource_group_name}" \
           -backend-config="container_name=${container_name}"
