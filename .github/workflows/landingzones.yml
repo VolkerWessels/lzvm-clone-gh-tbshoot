@@ -26,7 +26,7 @@ jobs:
     steps:
     - name: Checkout the repository
       uses: actions/checkout@v3
-    
+
     - name: Check for changes
       uses: dorny/paths-filter@v2
       id: changes
@@ -45,30 +45,30 @@ jobs:
       run: |
           import os
           import json
-          
+
           # Load the list of file paths from the environment variable
           changes = json.loads(os.environ['CHANGED_FILES'])
-          
+
           def set_output(name, value):
               with open(os.environ['GITHUB_OUTPUT'], 'a') as github_output:
                   print(f'{name}={value}', file=github_output)
-          
-          
+
+
           # Initialize lists for each tenant
           ssc_prd_list = []
           vwb_prd_list = []
           vwi_prd_list = []
           vwt_prd_list = []
-          
+
           # Iterate over the file paths
           for file_path in changes:
               # Split the file path by '/' to get its components
               path_components = file_path.split('/')
-              
+
               # Ensure there are at least 2 components to extract the tenant
               if len(path_components) >= 2:
                   tenant = path_components[1]  # Extract the tenant (the second component)
-                  
+
                   # Determine the appropriate tenant list and append the file path
                   if tenant == "ssc_prd":
                       ssc_prd_list.append(file_path)
@@ -78,7 +78,7 @@ jobs:
                       vwi_prd_list.append(file_path)
                   if tenant == "vwt_prd":
                       vwt_prd_list.append(file_path)
-          
+
           # If the list is empty, set it to 'none', this is needed to make the tenant workflow skippable
           if not ssc_prd_list:
               ssc_prd_list = 'none'
@@ -94,7 +94,7 @@ jobs:
           set_output('vwb_prd_matrix', vwb_prd_list)
           set_output('vwi_prd_matrix', vwi_prd_list)
           set_output('vwt_prd_matrix', vwt_prd_list)
-    
+
     - name: print the output
       run: |
         echo "CHANGED FILES: ${{ steps.changes.outputs.subscriptions_files }}"
@@ -102,7 +102,7 @@ jobs:
         echo "VWB_PRD CHANGES: ${{ steps.detect_changes.outputs.vwb_prd_matrix }}"
         echo "VWI_PRD CHANGES: ${{ steps.detect_changes.outputs.vwi_prd_matrix }}"
         echo "VWT_PRD CHANGES: ${{ steps.detect_changes.outputs.vwt_prd_matrix }}"
-  
+
   ### VWT ###
 
   vwt_prd_plan_subscriptions:
@@ -110,7 +110,7 @@ jobs:
     needs: [check_changed_files]
     if: needs.check_changed_files.outputs.vwt_prd_matrix != 'none'
     # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
-    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    uses: volkerwessels/lzvm-clone-gh-tbshoot/.github/workflows/landingzone-deployment.yml@main
     with:
       tf_action: plan
       tenant: vwt_prd
@@ -118,13 +118,13 @@ jobs:
       matrix: ${{ needs.check_changed_files.outputs.vwt_prd_matrix }}
       plan: lzvm
     secrets: inherit
-  
+
   vwt_prd_apply_subscriptions:
     name: VWT SUBSCRIPTIONS - Apply
     needs: [check_changed_files,vwt_prd_plan_subscriptions]
     if: needs.check_changed_files.outputs.vwt_prd_matrix != 'none' && github.event_name == 'push' && github.ref_name == 'main'
     # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
-    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    uses: volkerwessels/lzvm-clone-gh-tbshoot/.github/workflows/landingzone-deployment.yml@main
     with:
       tf_action: apply
       tenant: vwt_prd
@@ -132,12 +132,12 @@ jobs:
       matrix: ${{ needs.check_changed_files.outputs.vwt_prd_matrix }}
       plan: lzvm
     secrets: inherit
-  
+
   vwt_prd_plan_lz_baseline:
     name: VWT BASELINE - Plan
     needs: [vwt_prd_apply_subscriptions]
     # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
-    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    uses: volkerwessels/lzvm-clone-gh-tbshoot/.github/workflows/landingzone-deployment.yml@main
     with:
       tf_action: plan
       tenant: vwt_prd
@@ -145,12 +145,12 @@ jobs:
       matrix: ${{ needs.vwt_prd_apply_subscriptions.outputs.terraform_outputs }}
       plan: landingzone_baseline
     secrets: inherit
-  
+
   vwt_prd_apply_lz_baseline:
     name: VWT BASELINE - Apply
     needs: [vwt_prd_apply_subscriptions,vwt_prd_plan_lz_baseline]
     # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
-    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    uses: volkerwessels/lzvm-clone-gh-tbshoot/.github/workflows/landingzone-deployment.yml@main
     with:
       tf_action: apply
       tenant: vwt_prd
@@ -167,7 +167,7 @@ jobs:
     needs: [check_changed_files]
     if: needs.check_changed_files.outputs.vwb_prd_matrix != 'none'
     # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
-    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    uses: volkerwessels/lzvm-clone-gh-tbshoot/.github/workflows/landingzone-deployment.yml@main
     with:
       tf_action: plan
       tenant: vwb_prd
@@ -181,7 +181,7 @@ jobs:
     needs: [check_changed_files,vwb_prd_plan_subscriptions]
     if: needs.check_changed_files.outputs.vwb_prd_matrix != 'none' && github.event_name == 'push' && github.ref_name == 'main'
     # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
-    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    uses: volkerwessels/lzvm-clone-gh-tbshoot/.github/workflows/landingzone-deployment.yml@main
     with:
       tf_action: apply
       tenant: vwb_prd
@@ -194,7 +194,7 @@ jobs:
     name: VWB BASELINE - Plan
     needs: [vwb_prd_apply_subscriptions]
     # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
-    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    uses: volkerwessels/lzvm-clone-gh-tbshoot/.github/workflows/landingzone-deployment.yml@main
     with:
       tf_action: plan
       tenant: vwb_prd
@@ -207,7 +207,7 @@ jobs:
     name: VWB BASELINE - Apply
     needs: [vwb_prd_apply_subscriptions,vwb_prd_plan_lz_baseline]
     # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
-    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    uses: volkerwessels/lzvm-clone-gh-tbshoot/.github/workflows/landingzone-deployment.yml@main
     with:
       tf_action: apply
       tenant: vwb_prd
@@ -215,7 +215,7 @@ jobs:
       matrix: ${{ needs.vwb_prd_apply_subscriptions.outputs.terraform_outputs }}
       plan: landingzone_baseline
     secrets: inherit
-  
+
   ### VWI ###
 
   vwi_prd_plan_subscriptions:
@@ -223,7 +223,7 @@ jobs:
     needs: [check_changed_files]
     if: needs.check_changed_files.outputs.vwi_prd_matrix != 'none'
     # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
-    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    uses: volkerwessels/lzvm-clone-gh-tbshoot/.github/workflows/landingzone-deployment.yml@main
     with:
       tf_action: plan
       tenant: vwi_prd
@@ -237,7 +237,7 @@ jobs:
     needs: [check_changed_files,vwi_prd_plan_subscriptions]
     if: needs.check_changed_files.outputs.vwi_prd_matrix != 'none' && github.event_name == 'push' && github.ref_name == 'main'
     # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
-    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    uses: volkerwessels/lzvm-clone-gh-tbshoot/.github/workflows/landingzone-deployment.yml@main
     with:
       tf_action: apply
       tenant: vwi_prd
@@ -250,7 +250,7 @@ jobs:
     name: VWI BASELINE - Plan
     needs: [vwi_prd_apply_subscriptions]
     # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
-    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    uses: volkerwessels/lzvm-clone-gh-tbshoot/.github/workflows/landingzone-deployment.yml@main
     with:
       tf_action: plan
       tenant: vwi_prd
@@ -263,7 +263,7 @@ jobs:
     name: VWI BASELINE - Apply
     needs: [vwi_prd_apply_subscriptions,vwi_prd_plan_lz_baseline]
     # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
-    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    uses: volkerwessels/lzvm-clone-gh-tbshoot/.github/workflows/landingzone-deployment.yml@main
     with:
       tf_action: apply
       tenant: vwi_prd
@@ -279,7 +279,7 @@ jobs:
     needs: [check_changed_files]
     if: needs.check_changed_files.outputs.ssc_prd_matrix != 'none'
     # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
-    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    uses: volkerwessels/lzvm-clone-gh-tbshoot/.github/workflows/landingzone-deployment.yml@main
     with:
       tf_action: plan
       tenant: ssc_prd
@@ -293,7 +293,7 @@ jobs:
     needs: [check_changed_files,ssc_prd_plan_subscriptions]
     if: needs.check_changed_files.outputs.ssc_prd_matrix != 'none' && github.event_name == 'push' && github.ref_name == 'main'
     # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
-    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    uses: volkerwessels/lzvm-clone-gh-tbshoot/.github/workflows/landingzone-deployment.yml@main
     with:
       tf_action: apply
       tenant: ssc_prd
@@ -306,7 +306,7 @@ jobs:
     name: SSC BASELINE - Plan
     needs: [ssc_prd_apply_subscriptions]
     # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
-    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    uses: volkerwessels/lzvm-clone-gh-tbshoot/.github/workflows/landingzone-deployment.yml@main
     with:
       tf_action: plan
       tenant: ssc_prd
@@ -319,7 +319,7 @@ jobs:
     name: SSC BASELINE - Apply
     needs: [ssc_prd_apply_subscriptions,ssc_prd_plan_lz_baseline]
     # name: Teraform apply - ${{ inputs.stage }} - ${{ inputs.tf_action }}
-    uses: volkerwessels/cloud-platform-lzvm/.github/workflows/landingzone-deployment.yml@main
+    uses: volkerwessels/lzvm-clone-gh-tbshoot/.github/workflows/landingzone-deployment.yml@main
     with:
       tf_action: apply
       tenant: ssc_prd
