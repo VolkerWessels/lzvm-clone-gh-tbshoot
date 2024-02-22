@@ -1,13 +1,13 @@
 # Management group that will be created under the "Landingzones" management group
 # NOTE: If parent_management_group_exists is set to true, both the parent_management_group_name and management_group_name must exist!!!!
 parent_management_group_exists = false
-management_group_name        = "nieuweworkload" # translates to mg-ssc-tst-lz-${management_group_name}
+management_group_name          = "nieuweworkload" # translates to mg-ssc-tst-lz-${management_group_name}
 
 # subscription details for the naming convention and tagging
-subscription_type     = "shared"
-subscription_name     = "workload1"
-subscription_tags     = { "costcenter" : "823423", "environment" : "tst", "repository" : "cloud-platform-lzvm" }
-baseline_tags = {"baseline" = "true"}
+subscription_type = "shared"
+subscription_name = "workload1"
+subscription_tags = { "costcenter" : "823423", "environment" : "tst", "repository" : "cloud-platform-lzvm" }
+baseline_tags     = { "baseline" = "true" }
 
 # list of stages to create (each stage is a subscription)
 stages = ["dev", "tst"]
