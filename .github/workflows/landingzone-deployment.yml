@@ -118,7 +118,6 @@ jobs:
           echo container_name=tfstate >> $GITHUB_ENV
           echo var_file=../../${{ matrix.subscription }} >> $GITHUB_ENV
           echo subscription=${backend_key} >> $GITHUB_ENV
-          # echo ARM_SUBSCRIPTION_ID=${{ secrets.LAUNCHPAD_SUBSCRIPTION_ID }} >> $GITHUB_ENV
           echo ARM_SUBSCRIPTION_ID=${{ matrix.subscription.subscription_id }} >> $GITHUB_ENV
 
       - name: Download Plan
@@ -134,7 +133,6 @@ jobs:
         run: |
           terraform init \
           -backend-config="key=${backend_key}.tfstate" \
-          # -backend-config="subscription_id=${{ secrets.LAUNCHPAD_SUBSCRIPTION_ID }}" \
           -backend-config="subscription_id=${{ ARM_SUBSCRIPTION_ID }}" \
           -backend-config="storage_account_name=${storage_account_name}" \
           -backend-config="resource_group_name=${resource_group_name}" \
